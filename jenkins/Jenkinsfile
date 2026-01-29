@@ -1,28 +1,154 @@
 pipeline {
-    agent any
-    options {
-        skipStagesAfterUnstable()
+  agent any
+ 
+  /* ===== Global options & env ===== */
+  options {
+    timestamps()
+    ansiColor('xterm')
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+    skipDefaultCheckout(true) // we do checkout explicitly
+  }
+ 
+  // Adjust these to your setup
+  environment {
+    // --- Git ---
+    GIT_URL           = 'https://github.com/your-org/your-repo.git'
+    GIT_BRANCH        = 'main'               // or use multibranch
+ 
+    // --- Maven (configured in Manage Jenkins → Global Tool Configuration) ---
+    MVN_TOOL          = 'Maven-3.9.6'        // must match your configured name
+ 
+    // --- Artifactory (change to your URL/repo) ---
+    ARTIFACTORY_URL   = 'https://your-artifactory.example.com/artifactory'
+    ARTIFACTORY_REPO  = 'libs-release-local' // e.g., generic or maven-releases
+    ARTIFACT_PATH     = 'com/example/myapp'  // repo path (groupId-style)
+ 
+    // --- Docker / Docker Hub ---
+    DOCKER_REGISTRY   = 'docker.io'
+    DOCKER_IMAGE      = 'yourdockerhub/myapp' // e.g., sarahdsouza/myapp
+  }
+ 
+  tools {
+    maven "${env.MVN_TOOL}"
+  }
+ 
+  parameters {
+    string(name: 'OVERRIDE_VERSION', defaultValue: '', description: 'Optional: set a custom version/tag (e.g., 1.2.3). If blank, uses BUILD_NUMBER+GIT_SHA.')
+    booleanParam(name: 'SKIP_TESTS', defaultValue: false, description: 'Skip Maven tests?')
+  }
+ 
+  stages {
+ 
+    stage('Checkout Code') {
+      steps {
+        checkout([
+          $class: 'GitSCM',
+          branches: [[name: "*/${env.GIT_BRANCH}"]],
+          userRemoteConfigs: [[
+            url: env.GIT_URL,
+            credentialsId: 'git-cred' // <-- Create this in Jenkins
+          ]]
+        ])
+      }
     }
-    stages {
-        stage('Build') {
-            steps {
-                sh 'mvn -B -DskipTests clean package'
-            }
+ 
+    stage('Set Build Metadata') {
+      steps {
+        script {
+          env.GIT_SHA = sh(script: 'git rev-parse --short=8 HEAD', returnStdout: true).trim()
+          env.BUILD_VER = (params.OVERRIDE_VERSION?.trim()) ? params.OVERRIDE_VERSION.trim() : "${env.BUILD_NUMBER}-${env.GIT_SHA}"
+          echo "Resolved BUILD_VER: ${env.BUILD_VER}"
         }
-        stage('Test') {
-            steps {
-                sh 'mvn test'
-            }
-            post {
-                always {
-                    junit 'target/surefire-reports/*.xml'
-                }
-            }
-        }
-        stage('Deliver') { 
-            steps {
-                sh './jenkins/scripts/deliver.sh' 
-            }
-        }
+      }
     }
+ 
+    stage('Build with Maven') {
+      steps {
+        sh """
+          mvn -B \
+            clean package \
+            ${params.SKIP_TESTS ? '-DskipTests' : ''} \
+            --no-transfer-progress
+        """
+      }
+    }
+ 
+    stage('Publish Test Reports & Archive JAR') {
+      when { expression { return !params.SKIP_TESTS } }
+      steps {
+        junit testResults: '*/target/surefire-reports/*.xml, target/surefire-reports/*.xml', allowEmptyResults: true
+      }
+    }
+ 
+    stage('Upload Artifact to Artifactory') {
+      steps {
+        withCredentials([usernamePassword(
+          credentialsId: 'artifactory-cred', // <-- Create this in Jenkins
+          usernameVariable: 'ART_USER',
+          passwordVariable: 'ART_PASS'
+        )]) {
+          sh """
+            set -e
+            # Pick the first JAR found in target (adjust if WAR)
+            ART_FILE=\$(ls -1 target/*.jar | head -n1)
+            if [ -z "\$ART_FILE" ]; then
+              echo "No JAR found in target/. Did the build produce a JAR?" >&2
+              exit 1
+            fi
+ 
+            # Compose a nice path: /repo/com/example/myapp/<BUILD_VER>/myapp-<BUILD_VER>.jar
+            BASE_NAME=\$(basename "\$ART_FILE")
+            FILE_NAME="myapp-${BUILD_VER}.jar"
+            TARGET_URL="${ARTIFACTORY_URL}/${ARTIFACTORY_REPO}/${ARTIFACT_PATH}/${BUILD_VER}/${FILE_NAME}"
+ 
+            echo "Uploading \$ART_FILE to: \$TARGET_URL"
+            curl -sSf -u "${ART_USER}:${ART_PASS}" -T "\$ART_FILE" "\$TARGET_URL"
+ 
+            # Save a build info file for traceability
+            echo "artifact_url=\$TARGET_URL" > artifact_info.properties
+          """
+          archiveArtifacts artifacts: 'artifact_info.properties', onlyIfSuccessful: true
+        }
+      }
+    }
+ 
+    stage('Build Docker Image') {
+      steps {
+        sh """
+          set -e
+          docker --version
+          echo "Building Docker image: ${DOCKER_IMAGE}:${BUILD_VER}"
+          docker build -t ${DOCKER_IMAGE}:${BUILD_VER} -t ${DOCKER_IMAGE}:latest .
+        """
+      }
+    }
+ 
+    stage('Push Image to Docker Hub') {
+      steps {
+        withCredentials([usernamePassword(
+          credentialsId: 'dockerhub-cred', // <-- Create this in Jenkins
+          usernameVariable: 'DOCKER_USER',
+          passwordVariable: 'DOCKER_PASS'
+        )]) {
+          sh """
+            set -e
+            echo "${DOCKER_PASS}" | docker login -u "${DOCKER_USER}" --password-stdin ${DOCKER_REGISTRY}
+            docker push ${DOCKER_IMAGE}:${BUILD_VER}
+            docker push ${DOCKER_IMAGE}:latest
+            docker logout ${DOCKER_REGISTRY}
+          """
+        }
+      }
+    }
+  }
+ 
+  post {
+    success {
+      echo "Build complete. Version: ${env.BUILD_VER}"
+    }
+    always {
+      archiveArtifacts artifacts: 'target/*.jar', onlyIfSuccessful: false
+      cleanWs(deleteDirs: true, notFailBuild: true)
+    }
+  }
 }
