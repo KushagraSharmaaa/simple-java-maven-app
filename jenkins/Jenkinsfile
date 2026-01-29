@@ -57,6 +57,15 @@ pipeline {
         }
       }
     }
+    stage('Check JDK Version') {
+  steps {
+    sh '''
+      which java
+      java -version
+      javac -version
+    '''
+  }
+}
  
     stage('Build with Maven') {
       steps {
