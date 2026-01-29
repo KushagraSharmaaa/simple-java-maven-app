@@ -12,20 +12,17 @@ pipeline {
   // Adjust these to your setup
   environment {
     // --- Git ---
-    GIT_URL           = 'https://github.com/your-org/your-repo.git'
+    GIT_URL           = 'https://github.com/KushagraSharmaaa/Maven.git'
     GIT_BRANCH        = 'main'               // or use multibranch
  
     // --- Maven (configured in Manage Jenkins → Global Tool Configuration) ---
-    MVN_TOOL          = 'Maven-3.9.6'        // must match your configured name
+    MVN_TOOL          = 'Maven-3.9.12'        // must match your configured name
  
-    // --- Artifactory (change to your URL/repo) ---
-    ARTIFACTORY_URL   = 'https://your-artifactory.example.com/artifactory'
-    ARTIFACTORY_REPO  = 'libs-release-local' // e.g., generic or maven-releases
-    ARTIFACT_PATH     = 'com/example/myapp'  // repo path (groupId-style)
+    
  
     // --- Docker / Docker Hub ---
     DOCKER_REGISTRY   = 'docker.io'
-    DOCKER_IMAGE      = 'yourdockerhub/myapp' // e.g., sarahdsouza/myapp
+    DOCKER_IMAGE      = 'kushagraasharmaa/hellomaven' // e.g., sarahdsouza/myapp
   }
  
   tools {
@@ -80,37 +77,7 @@ pipeline {
       }
     }
  
-    stage('Upload Artifact to Artifactory') {
-      steps {
-        withCredentials([usernamePassword(
-          credentialsId: 'artifactory-cred', // <-- Create this in Jenkins
-          usernameVariable: 'ART_USER',
-          passwordVariable: 'ART_PASS'
-        )]) {
-          sh """
-            set -e
-            # Pick the first JAR found in target (adjust if WAR)
-            ART_FILE=\$(ls -1 target/*.jar | head -n1)
-            if [ -z "\$ART_FILE" ]; then
-              echo "No JAR found in target/. Did the build produce a JAR?" >&2
-              exit 1
-            fi
- 
-            # Compose a nice path: /repo/com/example/myapp/<BUILD_VER>/myapp-<BUILD_VER>.jar
-            BASE_NAME=\$(basename "\$ART_FILE")
-            FILE_NAME="myapp-${BUILD_VER}.jar"
-            TARGET_URL="${ARTIFACTORY_URL}/${ARTIFACTORY_REPO}/${ARTIFACT_PATH}/${BUILD_VER}/${FILE_NAME}"
- 
-            echo "Uploading \$ART_FILE to: \$TARGET_URL"
-            curl -sSf -u "${ART_USER}:${ART_PASS}" -T "\$ART_FILE" "\$TARGET_URL"
- 
-            # Save a build info file for traceability
-            echo "artifact_url=\$TARGET_URL" > artifact_info.properties
-          """
-          archiveArtifacts artifacts: 'artifact_info.properties', onlyIfSuccessful: true
-        }
-      }
-    }
+    \
  
     stage('Build Docker Image') {
       steps {
@@ -126,7 +93,7 @@ pipeline {
     stage('Push Image to Docker Hub') {
       steps {
         withCredentials([usernamePassword(
-          credentialsId: 'dockerhub-cred', // <-- Create this in Jenkins
+          credentialsId: 'dockerhub', // <-- Create this in Jenkins
           usernameVariable: 'DOCKER_USER',
           passwordVariable: 'DOCKER_PASS'
         )]) {
