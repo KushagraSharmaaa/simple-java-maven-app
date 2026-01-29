@@ -11,7 +11,7 @@ pipeline {
   // Adjust these to your setup
   environment {
     // --- Git ---
-    GIT_URL           = 'https://github.com/KushagraSharmaaa/Maven.git'
+    GIT_URL           = 'https://github.com/KushagraSharmaaa/simple-java-maven-app.git'
     GIT_BRANCH        = 'main'               // or use multibranch
  
     // --- Maven (configured in Manage Jenkins → Global Tool Configuration) ---
