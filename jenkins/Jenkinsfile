@@ -4,7 +4,6 @@ pipeline {
   /* ===== Global options & env ===== */
   options {
     timestamps()
-   
     buildDiscarder(logRotator(numToKeepStr: '20'))
     skipDefaultCheckout(true) // we do checkout explicitly
   }
