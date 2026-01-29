@@ -4,7 +4,7 @@ pipeline {
   /* ===== Global options & env ===== */
   options {
     timestamps()
-    ansiColor('xterm')
+   
     buildDiscarder(logRotator(numToKeepStr: '20'))
     skipDefaultCheckout(true) // we do checkout explicitly
   }
